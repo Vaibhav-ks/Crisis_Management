@@ -1,23 +1,20 @@
-def classify_severity(heatmap):
+def add_severity(zone_map,
+                 flood_weight=0.6,
+                 damage_weight=0.4):
+    """
+    Add severity score to each zone
+    """
 
-    severity = {}
+    for zone_id, data in zone_map.items():
 
-    rows = "ABCDEFGHIJ"
+        flood = data.get("flood_score", 0)
+        damage = data.get("damage_score", 0)
 
-    for i in range(len(heatmap)):
-        for j in range(len(heatmap[i])):
+        severity = (
+            flood_weight * flood +
+            damage_weight * damage
+        )
 
-            score = heatmap[i][j]
+        data["severity"] = round(severity, 3)
 
-            zone = f"{rows[i]}{j+1}"
-
-            if score > 0.7:
-                severity[zone] = "Critical"
-
-            elif score > 0.3:
-                severity[zone] = "Moderate"
-
-            else:
-                severity[zone] = "Low"
-
-    return severity
+    return zone_map
