@@ -1,4 +1,8 @@
 from agents.vision_agent.vision_agent import analyze_image
+from agents.resource_agent.drone_analysis import get_most_affected_zones
+from agents.drone_agent.drone_nodes import drone_decision_node, drone_dispatch_node
+from agents.drone_agent.drone_vision import drone_vision_node
+ 
 # from agents.resource_agent.resource_agent import allocate_drones
 # from agents.resource_agent.resource_agent import allocate_rescue_resources
 # from agents.route_planner.route_planner import plan_routes
@@ -7,7 +11,7 @@ from agents.vision_agent.vision_agent import analyze_image
 
 
 from db.update_from_vision import update_zones_from_vision
-# from db.update_people_count import update_people_count
+from db.update_people_count import update_people_count
 
 # from utils.admin_interface import admin_approval
 
@@ -39,6 +43,49 @@ def store_zone_node(state):
 
     return {}
 
+
+
+ # -----------------------------------
+# Drone Analysis → Most Affected Zones
+# -----------------------------------
+ 
+def drone_analysis_node(state):
+ 
+    print("\n[RESOURCE AGENT] Running Drone Analysis (Gemini-powered)")
+ 
+    affected_zones = get_most_affected_zones(db_path="crisis.db", top_n=5)
+ 
+    print(f"[RESOURCE AGENT] Most affected zones: {affected_zones}")
+ 
+    return {"most_affected_zones": affected_zones}
+ 
+ 
+# -----------------------------------
+# Update People Count
+# -----------------------------------
+ 
+def update_people_node(state):
+ 
+    print("\n[DB] Updating people counts in database")
+ 
+    update_people_count(state["people_counts"])
+ 
+    print("[DB] ✅ People counts saved to crisis.db")
+ 
+    return {}
+ 
+ 
+# Re-export drone nodes so master_graph can import everything from here
+__all__ = [
+    "vision_node",
+    "store_zone_node",
+    "drone_analysis_node",
+    "drone_decision_node",
+    "drone_dispatch_node",
+    "drone_vision_node",
+    "update_people_node",
+]
+ 
 
 # -----------------------------------
 # Drone Decision
