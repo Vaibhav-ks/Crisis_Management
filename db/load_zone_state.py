@@ -20,10 +20,10 @@ def load_zone_state():
         zone_id, flood, damage, severity, people = row
 
         zone_map[zone_id] = {
-            "flood_score": flood,
-            "damage_score": damage,
-            "severity": severity,
-            "people_count": people
+            "flood_score": flood or 0.0,
+            "damage_score": damage or 0.0,
+            "severity": severity or 0.0,
+            "people_count": people or 0
         }
 
     conn.close()

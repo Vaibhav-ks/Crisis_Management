@@ -1,35 +1,7 @@
-import sqlite3
+from db.load_zone_state import load_zone_state as load_zones_from_db
 
 
-def load_zones_from_db(db_path="crisis.db"):
-    """
-    Load zone data from crisis.db
-    """
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT zone_id, flood_score, damage_score, severity, people_count
-        FROM zones
-    """)
-
-    rows = cursor.fetchall()
-    conn.close()
-
-    zone_map = {}
-    for row in rows:
-        zone_id, flood, damage, severity, people = row
-        zone_map[zone_id] = {
-            "flood_score": flood or 0.0,
-            "damage_score": damage or 0.0,
-            "severity": severity or 0.0,
-            "people_count": people or 0
-        }
-
-    return zone_map
-
-
-def get_most_affected_zones(db_path="crisis.db", top_n=5):
+def get_most_affected_zones(top_n=5):
     """
     Load zones from crisis.db and return top N most affected
     sorted by: severity (primary), flood_score (tiebreaker)
@@ -38,7 +10,7 @@ def get_most_affected_zones(db_path="crisis.db", top_n=5):
         List[str]: e.g. ["Z23", "Z45", "Z12", "Z67", "Z89"]
     """
     print("[Drone Analysis] Loading zone data from database...")
-    zone_map = load_zones_from_db(db_path)
+    zone_map = load_zones_from_db()
 
     if not zone_map:
         print("[Drone Analysis] No zones found in database!")

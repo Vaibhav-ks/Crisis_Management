@@ -43,8 +43,9 @@ from .master_nodes import (
     drone_dispatch_node,
     drone_vision_node,
     update_people_node,
-    # rescue_decision_node,
-    # admin_resource_node,
+    rescue_decision_node,
+    admin_resource_node,
+    resource_approval_router
     # route_planner_node,
     # admin_route_node,
     # llm_message_node,
@@ -77,9 +78,9 @@ builder.add_node("drone_vision", drone_vision_node)
 
 builder.add_node("update_people", update_people_node)
 
-# builder.add_node("rescue_decision", rescue_decision_node)
+builder.add_node("rescue_decision", rescue_decision_node)
 
-# builder.add_node("admin_resource", admin_resource_node)
+builder.add_node("admin_resource", admin_resource_node)
 
 # builder.add_node("route_planner", route_planner_node)
 
@@ -114,7 +115,18 @@ builder.add_edge("drone_dispatch", "drone_vision")
 builder.add_edge("drone_vision", "update_people")
 
 
-builder.add_edge("update_people", END)
+builder.add_edge("update_people", "rescue_decision")
+
+builder.add_edge("rescue_decision", "admin_resource")
+
+builder.add_conditional_edges(
+    "admin_resource",
+    resource_approval_router,
+    {
+        "approved": END,
+        "rejected": "rescue_decision"
+    }
+)
 
 
 # builder.add_edge("update_people", "rescue_decision")
