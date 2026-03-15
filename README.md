@@ -70,7 +70,13 @@ Satellite Image
 └──────┬───────────┘
        │  approved
        ▼
-     END  (route_plan ready for dispatch / communication agent)
+┌──────────────────┐
+│  Communication   │  ← Gemini generates dispatch instructions per zone
+│     Agent        │    Twilio sends SMS to field teams
+└──────┬───────────┘    gTTS converts critical alerts to MP3 audio
+       │  dispatch_result: {instructions, sms_results, audio_files, summary}
+       ▼
+     END
 ```
 
 ---
@@ -162,6 +168,44 @@ Plans the actual road routes for every approved resource dispatch.
 **With real OSM roads** (`use_real_osm=True`): downloads actual OpenStreetMap roads for the exact lat/lon area, caches to disk so subsequent runs are instant.
 
 **With synthetic graph** (`use_real_osm=False`): builds a 3×3 grid of 9 road nodes centred on the image location — good for testing and offline use, gives rough distance estimates.
+
+---
+
+
+### Communication Agent (`agents/communication_agent/`)
+
+Generates human-readable dispatch instructions, sends SMS alerts, and produces audio files for radio broadcast.
+
+| File | What it does |
+|------|-------------|
+| `gemini_client.py` | Three Gemini calls: generate field instructions, summarize reports, translate to local language |
+| `sms_dispatcher.py` | Twilio SMS and WhatsApp dispatch to field team phone numbers |
+| `tts_engine.py` | gTTS text-to-speech — converts Critical zone alerts to MP3 audio files saved in `audio_outputs/` |
+| `communication_agent.py` | Main entry point: `dispatch_all()` — ties everything together |
+
+**Input** (from Route Agent via Master State):
+```python
+route_plans     # list of route dicts from plan_all_routes()
+zone_metadata   # {"Z35": {"severity": "Critical", "victim_count": 12}, ...}
+field_reports   # optional list of ground team report strings
+dispatch_config # {"language": "English", "send_sms": False, "generate_audio": True}
+```
+
+**Output:**
+```python
+{
+    "instructions": {"Z35": "1. Proceed to Zone Z35...", ...},
+    "sms_results":  [{"zone": "Z35", "success": True, "sid": "SM..."}],
+    "audio_files":  ["agents/communication_agent/audio_outputs/dispatch_Z35_ambulances.mp3"],
+    "summary":      "Z35: 12 trapped, critical injuries. Z72: flood receding, 5 survivors."
+}
+```
+
+**Languages supported:** English, Hindi, Tamil, Telugu, Bengali, Marathi, Gujarati, Punjabi, Urdu.
+
+**SMS:** Disabled by default (`send_sms=False`). Enable by setting `send_sms=True` in `dispatch_config` and adding Twilio credentials to `.env`.
+
+**Audio:** Only generated for `Critical` severity zones to keep output clean.
 
 ---
 
