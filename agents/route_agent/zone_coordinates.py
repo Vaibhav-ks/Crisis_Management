@@ -2,87 +2,116 @@
 zone_coordinates.py
 -------------------
 The Vision Agent divides an image into a 10X10 grid and names each cell
-like  Z11, Z12 ... Z1_10, Z21 ... Z10_10.
+using 0-based row/col indices:
 
-This file converts those zone names into real-world GPS coordinates
-(the center of each zone) so the Route Agent knows WHERE to navigate.
+    grid_mapper.py line:  zone_id = f"Z{gy}{gx}"   # gy=0..9, gx=0..9
 
-Row index = first number  (1 = top row)
-Column index= second number (1 = left col)
+So the actual zone names produced are:
+    Z00, Z01, Z02 ... Z09
+    Z10, Z11, Z12 ... Z19
+    ...
+    Z90, Z91, Z92 ... Z99
 
-Example:  Z12  ->  row 1, col 2
+This file converts those names into real-world GPS coordinates (zone centre)
+so the Route Agent knows WHERE to navigate.
+
+Row  = first digit after Z  (0 = top row,    9 = bottom row)
+Col  = second digit(s)       (0 = left col,   9 = right col)
+
+Example:  "Z35" → row=3, col=5 (4th row from top, 6th col from left)
+
 """
 
-from .geo_reference import pixel_to_latlon, build_geo_transform
+from .geo_reference import pixel_to_latlon
 
 
+# Must match grid_size=10 in grid_mapper.py  (Vision Agent)
 GRID_ROWS = 10
 GRID_COLS = 10
 
 
-# ---------------------------------------------------------------------------
-# Zone name parser
-# ---------------------------------------------------------------------------
+# ── Zone name parser ──────────────────────────────────────────────────────────
 
 def parse_zone_name(zone_name: str) -> tuple:
     """
-    Parse a zone name string like 'Z12' or 'Z1_2' into (row_idx, col_idx).
-    Row and col are 1-based (Z11 = row 1, col 1).
+    Parse a zone name string → (row_idx, col_idx), both 0-based.
 
-    Accepted formats:
-        'Z12'   → row=1, col=2   (only works up to col 9)
-        'Z1_10' → row=1, col=10  (use underscore for col ≥ 10)
-        'Z10_5' → row=10, col=5
+    Formats accepted (all produced by grid_mapper.py):
+        "Z35"    → row=3, col=5    single-digit row + single-digit col
+        "Z3_10"  → row=3, col=10   underscore used when col ≥ 10
+
+    Returns (row, col) as ints starting from 0.
+
+    FIX vs old code: old parser had `col = int(body[1:]) if len(body) > 1 else 1`
+    which silently set col=1 for a bare "Z3" (missing col).  Now we raise
+    a clear ValueError for malformed names.
     """
     name = zone_name.strip().upper()
     if not name.startswith("Z"):
-        raise ValueError(f"Zone name must start with 'Z', got: {zone_name}")
+        raise ValueError(f"Zone name must start with 'Z', got: {zone_name!r}")
 
-    body = name[1:]   # strip the leading Z
+    body = name[1:]  # everything after the leading 'Z'
 
     if "_" in body:
-        parts = body.split("_")
+        # e.g. "Z3_10" → row=3, col=10
+        parts = body.split("_", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Malformed zone name with underscore: {zone_name!r}")
         row, col = int(parts[0]), int(parts[1])
     else:
-        # single-digit row and col: 'Z12' → row=1, col=2
+        # e.g. "Z35" → row=3, col=5
+        # Vision Agent always produces single-digit row and col (0-9)
+        if len(body) < 2:
+            raise ValueError(
+                f"Zone name {zone_name!r} too short — "
+                "expected at least 2 digits after 'Z' (e.g. 'Z00', 'Z35')."
+            )
         row = int(body[0])
-        col = int(body[1:]) if len(body) > 1 else 1
+        col = int(body[1:])  # handles col 0-9 (and hypothetical 10-99 via underscore form)
 
-    return row, col
+    return row, col  # 0-based, matching Vision Agent's gy, gx
 
 
-# ---------------------------------------------------------------------------
-# Zone center in pixels
-# ---------------------------------------------------------------------------
+# ── Zone centre in pixels ─────────────────────────────────────────────────────
 
-def zone_center_pixels(row: int, col: int, image_width_px: int,
-                       image_height_px: int) -> tuple:
+def zone_center_pixels(row: int, col: int,
+                       image_width_px: int, image_height_px: int) -> tuple:
     """
-    Return the pixel coordinate of the CENTER of a grid cell.
+    Return the pixel coordinate (px, py) of the CENTRE of a grid cell.
 
-    row, col are 1-based.
+    Parameters
+    ----------
+    row, col         : 0-based grid indices  (0 = top/left)
+    image_width_px   : full image width in pixels
+    image_height_px  : full image height in pixels
+
+    Returns
+    -------
+    (px, py) floats — pixel coordinates of the cell centre
+
+    FIX vs old code: old formula was (col - 1) * cell_w which is the 1-based
+    offset.  With 0-based indices we just multiply directly.
     """
     cell_w = image_width_px  / GRID_COLS
     cell_h = image_height_px / GRID_ROWS
 
-    # center of the cell
-    px = (col - 1) * cell_w + cell_w / 2
-    py = (row - 1) * cell_h + cell_h / 2
+    # 0-based: col=0 → left edge at 0, centre at cell_w/2
+    #          col=1 → left edge at cell_w, centre at cell_w + cell_w/2
+    px = col * cell_w + cell_w / 2
+    py = row * cell_h + cell_h / 2
 
     return px, py
 
 
-# ---------------------------------------------------------------------------
-# Main public function
-# ---------------------------------------------------------------------------
+# ── Main public function ──────────────────────────────────────────────────────
 
 def get_zone_latlon(zone_name: str, geo_transform: dict) -> tuple:
     """
-    Full pipeline: zone name → (latitude, longitude) of zone center.
+    Full pipeline: zone name → (latitude, longitude) of the zone's centre.
 
     Parameters
     ----------
-    zone_name     : e.g. 'Z12', 'Z3_10'
+    zone_name     : e.g. "Z35", "Z3_10"  (0-based, Vision Agent format)
     geo_transform : dict returned by build_geo_transform()
 
     Returns
@@ -90,34 +119,26 @@ def get_zone_latlon(zone_name: str, geo_transform: dict) -> tuple:
     (lat, lon) tuple
     """
     row, col = parse_zone_name(zone_name)
-
-    px, py = zone_center_pixels(
+    px, py   = zone_center_pixels(
         row, col,
         geo_transform["image_width_px"],
-        geo_transform["image_height_px"]
+        geo_transform["image_height_px"],
     )
-
-    lat, lon = pixel_to_latlon(px, py, geo_transform)
-    return lat, lon
+    return pixel_to_latlon(px, py, geo_transform)
 
 
 def get_all_zone_coordinates(geo_transform: dict) -> dict:
     """
-    Build a dictionary of ALL 100 zone centers at once.
-    Useful for pre-computing during startup.
+    Pre-compute GPS coordinates for all 100 zones.
+    Useful to cache at startup.
 
     Returns
     -------
-    { 'Z11': (lat, lon), 'Z12': (lat, lon), ... 'Z10_10': (lat, lon) }
+    { "Z00": (lat, lon), "Z01": (lat, lon), ..., "Z99": (lat, lon) }
     """
     coords = {}
-    for row in range(1, GRID_ROWS + 1):
-        for col in range(1, GRID_COLS + 1):
-            if col <= 9:
-                name = f"Z{row}{col}"
-            else:
-                name = f"Z{row}_{col}"
-
+    for row in range(GRID_ROWS):
+        for col in range(GRID_COLS):
+            name = f"Z{row}{col}"
             coords[name] = get_zone_latlon(name, geo_transform)
-
     return coords
