@@ -1,12 +1,12 @@
 """
 zone_coordinates.py
 -------------------
-The Vision Agent divides an image into a 10X10 grid and names each cell
+The Vision Agent divides an image into a 10×10 grid and names each cell
 using 0-based row/col indices:
 
-    grid_mapper.py line:  zone_id = f"Z{gy}{gx}"   # gy=0..9, gx=0..9
+    grid_mapper.py:  zone_id = f"Z{gy}{gx}"   # gy=0..9, gx=0..9
 
-So the actual zone names produced are:
+Zone names produced are:
     Z00, Z01, Z02 ... Z09
     Z10, Z11, Z12 ... Z19
     ...
@@ -19,13 +19,10 @@ Row  = first digit after Z  (0 = top row,    9 = bottom row)
 Col  = second digit(s)       (0 = left col,   9 = right col)
 
 Example:  "Z35" → row=3, col=5 (4th row from top, 6th col from left)
-
 """
 
 from .geo_reference import pixel_to_latlon
 
-
-# Must match grid_size=10 in grid_mapper.py  (Vision Agent)
 GRID_ROWS = 10
 GRID_COLS = 10
 
@@ -34,40 +31,33 @@ GRID_COLS = 10
 
 def parse_zone_name(zone_name: str) -> tuple:
     """
-    Parse a zone name string → (row_idx, col_idx), both 0-based.
+    Parse a zone name string to (row_idx, col_idx), both 0-based.
 
-    Formats accepted (all produced by grid_mapper.py):
-        "Z35"    → row=3, col=5    single-digit row + single-digit col
-        "Z3_10"  → row=3, col=10   underscore used when col ≥ 10
+    Formats accepted:
+        "Z35"   → row=3, col=5
+        "Z3_10" → row=3, col=10  (underscore used when col ≥ 10)
 
-    Returns (row, col) as ints starting from 0.
-
-    FIX vs old code: old parser had `col = int(body[1:]) if len(body) > 1 else 1`
-    which silently set col=1 for a bare "Z3" (missing col).  Now we raise
-    a clear ValueError for malformed names.
+    Raises ValueError for malformed names.
     """
     name = zone_name.strip().upper()
     if not name.startswith("Z"):
         raise ValueError(f"Zone name must start with 'Z', got: {zone_name!r}")
 
-    body = name[1:]  # everything after the leading 'Z'
+    body = name[1:]
 
     if "_" in body:
-        # e.g. "Z3_10" → row=3, col=10
         parts = body.split("_", 1)
         if len(parts) != 2:
             raise ValueError(f"Malformed zone name with underscore: {zone_name!r}")
         row, col = int(parts[0]), int(parts[1])
     else:
-        # e.g. "Z35" → row=3, col=5
-        # Vision Agent always produces single-digit row and col (0-9)
         if len(body) < 2:
             raise ValueError(
                 f"Zone name {zone_name!r} too short — "
                 "expected at least 2 digits after 'Z' (e.g. 'Z00', 'Z35')."
             )
         row = int(body[0])
-        col = int(body[1:])  # handles col 0-9 (and hypothetical 10-99 via underscore form)
+        col = int(body[1:])
 
     return row, col  # 0-based, matching Vision Agent's gy, gx
 
@@ -88,15 +78,11 @@ def zone_center_pixels(row: int, col: int,
     Returns
     -------
     (px, py) floats — pixel coordinates of the cell centre
-
-    FIX vs old code: old formula was (col - 1) * cell_w which is the 1-based
-    offset.  With 0-based indices we just multiply directly.
     """
     cell_w = image_width_px  / GRID_COLS
     cell_h = image_height_px / GRID_ROWS
 
     # 0-based: col=0 → left edge at 0, centre at cell_w/2
-    #          col=1 → left edge at cell_w, centre at cell_w + cell_w/2
     px = col * cell_w + cell_w / 2
     py = row * cell_h + cell_h / 2
 
@@ -111,7 +97,7 @@ def get_zone_latlon(zone_name: str, geo_transform: dict) -> tuple:
 
     Parameters
     ----------
-    zone_name     : e.g. "Z35", "Z3_10"  (0-based, Vision Agent format)
+    zone_name     : e.g. "Z35" or "Z3_10"  (0-based, Vision Agent format)
     geo_transform : dict returned by build_geo_transform()
 
     Returns
@@ -129,8 +115,7 @@ def get_zone_latlon(zone_name: str, geo_transform: dict) -> tuple:
 
 def get_all_zone_coordinates(geo_transform: dict) -> dict:
     """
-    Pre-compute GPS coordinates for all 100 zones.
-    Useful to cache at startup.
+    Pre-compute GPS coordinates for all 100 zones (Z00–Z99).
 
     Returns
     -------

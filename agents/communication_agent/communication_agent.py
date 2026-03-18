@@ -67,7 +67,7 @@ def _build_route_summary(plan: dict) -> str:
     if not plan.get("success"):
         return "Route unavailable — direct navigation required."
     return (
-        f"{plan['origin']} → Zone {plan['zone']} "
+        f"{plan['origin_name']} → Zone {plan['zone']} "
         f"({plan['distance_km']} km, ~{plan['eta_minutes']} min)"
     )
 

@@ -11,7 +11,10 @@ Runs in sequence:
   4. build_zone_map   — aggregate scores into 10×10 grid
   5. add_severity     — compute weighted severity score per zone
 """
+from streamlit import image
 
+from .visualizer import draw_zone_grid
+import os
 from .preprocess        import load_image
 from .flood_segmentation import detect_flood
 from .earthquake        import detect_damage
@@ -53,6 +56,15 @@ def analyze_image(image_path: str) -> dict:
 
     # 5. Add composite severity score to each zone
     zone_map = add_severity(zone_map)
+
+    # create output folder
+    output_dir = "zone_results"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # save grid image
+    output_path = os.path.join(output_dir, "grid_output.jpg")
+
+    draw_zone_grid(image, zone_map, output_path)
 
     return {
         "zone_map":       zone_map,
