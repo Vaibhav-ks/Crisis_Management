@@ -16,6 +16,11 @@ env/
 !.env.example
 !sample.env
 
+# 3 db
+
+crisis.db
+scanned_images/*
+!scanned_images/.gitkeep
 
 # 4. Application Caches (Keep folder, ignore contents)
 cache/*
