@@ -1,4 +1,53 @@
-venv/
+# ==========================================
+# AEGIS CRISIS MANAGEMENT - .GITIGNORE
+# ==========================================
+
+# 1. Python & Virtual Environments
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+venv/
+env/
+.pytest_cache/
+
+# 2. Secrets & Environment Variables
 .env
+.env.*
+!.env.example
+!sample.env
+
+
+# 4. Application Caches (Keep folder, ignore contents)
+cache/*
+!cache/.gitkeep
+agents/route_agent/_road_cache/*
+!agents/route_agent/_road_cache/.gitkeep
+*.pkl
+
+# 5. Pipeline Inputs & Outputs (Keep folder, ignore contents)
+
+satellite_images/*
+!satellite_images/.gitkeep
+
+
+zone_results/*
+!zone_results/.gitkeep
+
+agents/communication_agent/audio_outputs/*
+!agents/communication_agent/audio_outputs/.gitkeep
+
+# Ignore all stray audio files just in case
+*.mp3
+
+# 6. Stray Root-Level Test Images
+bus.jpg
+Test_image3.jpg
+
+# 7. OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
