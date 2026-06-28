@@ -16,6 +16,7 @@ from .flood_segmentation    import detect_flood
 from .grid_mapper           import build_zone_map
 from .severity              import add_severity
 from .building_segmentation import detect_buildings
+from .earthquake            import detect_damage
 from .visualizer            import draw_zone_grid
 
 
@@ -47,7 +48,7 @@ def analyze_image(image_path: str) -> dict:
     zone_map = build_zone_map(
         image             = image,
         flood_prob_map    = flood_prob_map,
-        damage_detections = [],            # no earthquake detections
+        damage_detections = detect_damage(image),            # no earthquake detections
         building_prob_map = building_prob_map,
     )
 

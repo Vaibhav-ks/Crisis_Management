@@ -52,6 +52,45 @@ PIXEL_THRESHOLD = 0.45
 FLOOD_FRACTION  = 0.10
 WATCH_INTERVAL  = 3.0   # seconds between watcher polls
 
+# ── Watcher lock (prevents two Streamlit processes fighting over the same folder) ──
+LOCK_FILE = Path(_ROOT) / ".watcher.lock"
+
+def _acquire_watcher_lock() -> bool:
+    """
+    Try to acquire the per-folder watcher lock.
+    Returns True if THIS process now owns the lock, False if another
+    live process already holds it.
+    """
+    my_pid = os.getpid()
+    if LOCK_FILE.exists():
+        try:
+            stored = int(LOCK_FILE.read_text().strip())
+            if stored == my_pid:
+                return True               # we already own it
+            # Check whether the other process is still alive
+            try:
+                os.kill(stored, 0)        # signal 0 = existence check only
+                return False              # other process alive → can't take lock
+            except (ProcessLookupError, PermissionError):
+                pass                      # other process dead → take over
+        except (ValueError, OSError):
+            pass
+    try:
+        LOCK_FILE.write_text(str(my_pid))
+    except OSError:
+        pass
+    return True
+
+def _release_watcher_lock():
+    """Release the lock if owned by this process."""
+    my_pid = os.getpid()
+    if LOCK_FILE.exists():
+        try:
+            if int(LOCK_FILE.read_text().strip()) == my_pid:
+                LOCK_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
 # ============================================================================
 #  THEME
 # ============================================================================
@@ -537,6 +576,26 @@ def _sidebar():
 
         st.divider()
         st.metric("Stage", f"{st.session_state.get('stage',0)+1} / {len(STAGES)}")
+
+        # ── Process identity — helps users spot dual-terminal conflicts ───
+        lock_owner = None
+        try:
+            if LOCK_FILE.exists():
+                lock_owner = int(LOCK_FILE.read_text().strip())
+        except Exception:
+            pass
+        my_pid = os.getpid()
+        if lock_owner == my_pid:
+            pid_color, pid_label = THEME["green"], f"🟢 Watcher ACTIVE (PID {my_pid})"
+        elif lock_owner:
+            pid_color, pid_label = THEME["red"],   f"🔴 Watcher locked by PID {lock_owner} — this tab is read-only"
+        else:
+            pid_color, pid_label = "#888",          f"⚪ No watcher lock (PID {my_pid})"
+        st.markdown(
+            f'<div class="card" style="font-size:10px;font-family:\'Share Tech Mono\',monospace;">'
+            f'<span style="color:{pid_color};">{pid_label}</span></div>',
+            unsafe_allow_html=True)
+
         st.divider()
         if st.button("🔄 Full Reset", use_container_width=True):
             _do_full_reset()
@@ -647,6 +706,18 @@ def _do_full_reset():
     st.session_state["meta_lat"]       = meta_lat
     st.session_state["meta_lon"]       = meta_lon
     st.session_state["meta_cov"]       = meta_cov
+    # Clear stale zone images/results from previous run
+    for folder_name in ("zone_results", "zone_images"):
+        folder = Path(_ROOT) / folder_name
+        if folder.exists():
+            for f in folder.iterdir():
+                if f.is_file():
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
+    # Release watcher lock so the new session can re-acquire it
+    _release_watcher_lock()
     st.balloons()
     st.rerun()
 
@@ -707,6 +778,26 @@ def stage_1():
         f'No-flood images \u2192 moved to <code>scanned_images/</code> immediately.<br>'
         f'Flood images \u2192 pipeline fires \u2192 image moved after completion.</span>'
         f'</div>', unsafe_allow_html=True)
+
+    # ── Watcher lock: only ONE process may drive the watcher at a time ────
+    # Two open terminals both running `streamlit run streamlit_app.py` each
+    # create a separate Python process.  Without a lock they race over the
+    # same satellite_images/, crisis.db, zone_results/ and cause:
+    #   • Double pipeline execution for the same image
+    #   • FileNotFoundError when both try to shutil.move() the same file
+    #   • Corrupt DB writes from two concurrent SQLite connections
+    if not _acquire_watcher_lock():
+        st.warning(
+            "⚠️ **Another AEGIS terminal already owns the image watcher.**\n\n"
+            "Running two Streamlit servers simultaneously causes race conditions "
+            "(duplicate pipeline runs, file-move errors, DB corruption).\n\n"
+            "**Fix:** stop the other terminal, or use only one browser tab per server.",
+            icon="🚫",
+        )
+        st.info(f"PID {os.getpid()} will re-check the lock in 5 s…")
+        time.sleep(5)
+        st.rerun()
+        return
 
     with st.expander("📍 Location Metadata", expanded=False):
         c1, c2, c3 = st.columns(3)

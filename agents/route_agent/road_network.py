@@ -33,6 +33,12 @@ except ImportError:
     SHAPELY_AVAILABLE = False
 
 
+# ── In-memory caches (persist across calls within the same process) ────────────
+# Avoids re-loading large pickle files and re-projecting graphs on every call.
+
+_GRAPH_CACHE: dict = {}      # (lat4, lon4, radius_m) → nx.MultiDiGraph
+_PROJ_CACHE:  dict = {}      # id(G) → projected_G (for nearest_node speed)
+
 # ── Disk cache ────────────────────────────────────────────────────────────────
 
 _CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_road_cache")
@@ -50,7 +56,8 @@ def download_road_network(center_lat: float, center_lon: float,
                           force_refresh: bool = False) -> nx.MultiDiGraph:
     """
     Download the drivable road network within radius_m metres of a point.
-    Results are cached to disk so subsequent calls are instant.
+    Results are cached in memory (fastest) then on disk so subsequent calls
+    are near-instant.
 
     Returns a NetworkX MultiDiGraph where:
         Nodes = road intersections  (attrs: x=lon, y=lat)
@@ -63,12 +70,23 @@ def download_road_network(center_lat: float, center_lon: float,
             "Or pass use_real_osm=False for offline mode."
         )
 
+    mem_key = (round(center_lat, 4), round(center_lon, 4), radius_m)
+
+    # ── Level 1: In-memory cache (fastest — no disk I/O) ──────────────────
+    if not force_refresh and mem_key in _GRAPH_CACHE:
+        G = _GRAPH_CACHE[mem_key]
+        print(f"[RoadNetwork] In-memory cache hit — {len(G.nodes)} nodes, {len(G.edges)} edges")
+        return G
+
     fpath = _cache_path(center_lat, center_lon, radius_m)
+
+    # ── Level 2: Disk cache ────────────────────────────────────────────────
     if not force_refresh and os.path.exists(fpath):
         print(f"[RoadNetwork] Loading cached OSM graph: {fpath}")
         with open(fpath, "rb") as fh:
             G = pickle.load(fh)
-        print(f"[RoadNetwork] Cache hit — {len(G.nodes)} nodes, {len(G.edges)} edges")
+        print(f"[RoadNetwork] Disk cache hit — {len(G.nodes)} nodes, {len(G.edges)} edges")
+        _GRAPH_CACHE[mem_key] = G  # warm the in-memory cache
         return G
 
     print(f"[RoadNetwork] Downloading OSM roads around "
@@ -94,6 +112,7 @@ def download_road_network(center_lat: float, center_lon: float,
     with open(fpath, "wb") as fh:
         pickle.dump(G, fh)
     print(f"[RoadNetwork] Graph cached to {fpath}")
+    _GRAPH_CACHE[mem_key] = G  # warm the in-memory cache
     return G
 
 
@@ -104,13 +123,22 @@ def nearest_node(G: nx.MultiDiGraph, lat: float, lon: float) -> int:
     Return the OSM node ID closest to (lat, lon).
 
     Projects graph to UTM first to avoid scikit-learn dependency.
-    Falls back to manual Euclidean search if projection fails.
+    The projected graph is cached in _PROJ_CACHE (keyed by id(G)) so the
+    expensive projection is only done ONCE per unique graph object — not
+    on every call.
+    Falls back to approximate Euclidean search if projection fails.
     """
     if not OSMNX_AVAILABLE:
         raise ImportError("Install osmnx: pip install osmnx")
 
+    g_id = id(G)
+
     try:
-        G_proj = ox.project_graph(G)
+        # Use cached projected graph (avoids O(V+E) re-projection each call)
+        if g_id not in _PROJ_CACHE:
+            _PROJ_CACHE[g_id] = ox.project_graph(G)
+        G_proj = _PROJ_CACHE[g_id]
+
         import pyproj
         crs = G_proj.graph.get("crs", "EPSG:4326")
         transformer = pyproj.Transformer.from_crs("EPSG:4326", crs, always_xy=True)
@@ -120,9 +148,13 @@ def nearest_node(G: nx.MultiDiGraph, lat: float, lon: float) -> int:
         except AttributeError:
             return ox.nearest_nodes(G_proj, X=x_proj, Y=y_proj)
     except Exception:
+        # Fast Euclidean fallback (degree-space with latitude correction)
         best_node, best_dist = None, float("inf")
+        cos_lat = math.cos(math.radians(lat))
         for nid, data in G.nodes(data=True):
-            d = ((data["y"] - lat) ** 2 + (data["x"] - lon) ** 2) ** 0.5
+            dlat = (data["y"] - lat) * 111_000
+            dlon = (data["x"] - lon) * 111_000 * cos_lat
+            d    = dlat * dlat + dlon * dlon  # skip sqrt — only comparing
             if d < best_dist:
                 best_dist, best_node = d, nid
         return best_node
@@ -180,11 +212,17 @@ def remove_blocked_roads(G: nx.MultiDiGraph, blocked_polygons: list,
     Set a huge travel_time penalty on edges whose midpoint lies inside a
     blocked polygon so Dijkstra routes around them.
 
+    IMPORTANT: Works on a copy of G so the in-memory cached graph is NEVER
+    mutated — flood masks from one pipeline run must not persist into the next.
+
     Using a penalty rather than deletion keeps the graph connected so a longer
     safe route can always be found.
     """
     if not SHAPELY_AVAILABLE or not blocked_polygons:
         return G
+
+    # Work on a copy to protect the cached original
+    G = G.copy()
 
     blocked_count = 0
     for u, v, key, data in G.edges(keys=True, data=True):
