@@ -11,7 +11,7 @@ Two supported cases:
 Every other file in the Route Agent calls geo_reference to turn pixel/zone
 positions into real GPS coordinates before touching any road data.
 
-FIX (2026-03): All returned values are explicitly cast to native Python float
+All returned values are explicitly cast to native Python float
 so that LangGraph's MemorySaver (msgpack) can serialise them without raising
 "Type is not msgpack serializable: numpy.float64".
 """

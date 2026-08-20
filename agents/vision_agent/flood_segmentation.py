@@ -12,7 +12,7 @@ model = smp.Unet(
 )
 
 model.load_state_dict(torch.load("agents/vision_agent/unet_flood_modelN.pth", map_location="cpu"))
-model.eval()
+model.eval() #places in evaluation mode then batchnorm
 
 
 def detect_flood(image):
@@ -23,7 +23,7 @@ def detect_flood(image):
 
     tensor = torch.tensor(img).permute(2,0,1).unsqueeze(0).float()
 
-    with torch.no_grad():
+    with torch.no_grad(): #no gradients
         pred = model(tensor)
 
     prob_map = torch.sigmoid(pred).squeeze().numpy()
